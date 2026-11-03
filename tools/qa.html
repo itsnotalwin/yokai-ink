@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Yokai Ink — QA scenes</title>
+  <style>
+    html, body { margin: 0; background: #111; }
+    canvas { display: block; width: 1600px; height: 1000px; }
+  </style>
+</head>
+<body>
+  <canvas id="c" width="1600" height="1000"></canvas>
+  <script>
+    window.addEventListener('error', (e) => { document.title = 'ERR ' + (e.message || 'unknown'); });
+    window.addEventListener('unhandledrejection', (e) => { document.title = 'ERR ' + (e.reason && e.reason.message || 'reject'); });
+  </script>
+  <script type="module">
+    import { newRun, startCombat, updateCombat, continueRun, setSpeed } from '../src/state.js';
+    import { createRenderer } from '../src/render/render.js';
+    import { buySlot, reroll } from '../src/shop.js';
+    import { UNIT_BY_ID } from '../src/data/units.js';
+    import { countOnBoard } from '../src/board.js';
+
+    /** A greedy shopper, mirroring tools/tune.mjs (which is node-only). */
+    function botPrep(state) {
+      for (let guard = 0; guard < 12; guard++) {
+        let acted = false;
+        for (let i = 0; i < state.shop.length; i++) {
+          const id = state.shop[i];
+          if (!id) continue;
+          const cost = UNIT_BY_ID[id].cost;
+          const want = state.units.filter((u) => u.defId === id).length % 3 === 2;
+          if (cost <= state.gold && (want || state.gold >= cost + 3)) {
+            if (buySlot(state, i).ok) { acted = true; }
+          }
+        }
+        if (!acted && state.gold >= 4 && state.gold < 12 && countOnBoard(state) < 5) {
+          if (reroll(state, state.shopRng).ok) { acted = true; }
+        }
+        if (!acted) break;
+      }
+    }
+
+    const p = new URLSearchParams(location.search);
+    const scene = p.get('scene') || 'prep';
+    const targetRound = Number(p.get('round') || 1);
+    const seconds = Number(p.get('t') || 7);
+    const seed = Number(p.get('seed') || 20261103);
+
+    const canvas = document.getElementById('c');
+    const renderer = createRenderer(canvas);
+    renderer.resize();
+
+    let state = newRun(seed);
+    setSpeed(state, 1);
+
+    function runOut(limit = 60 * 90) {
+      let n = 0;
+      while (state.phase === 'combat' && n < limit) { updateCombat(state, 1 / 60); n++; }
+    }
+
+    // Play the greedy bot up to the requested round.
+    for (let r = 1; r < targetRound; r++) {
+      botPrep(state);
+      const ok = startCombat(state);
+      if (!ok.ok) break;
+      runOut();
+      if (state.phase === 'result') continueRun(state);
+      else break;
+    }
+    if (state.phase === 'prep') botPrep(state);
+
+    // ?select=1 — open the stat card on the most expensive unit you own.
+    if (p.get('select') === '1' && state.phase === 'prep') {
+      const onBoard = state.units.filter((u) => u.loc.type === 'board');
+      const pool = onBoard.length ? onBoard : state.units;
+      pool.sort((a, b) => (b.star - a.star) || (UNIT_BY_ID[b.defId].cost - UNIT_BY_ID[a.defId].cost));
+      state.selected = pool[0] || null;
+    }
+    if (p.get('difficulty')) state.difficulty = p.get('difficulty');
+
+    if (scene === 'combat' || scene === 'result') {
+      const ok = startCombat(state);
+      if (ok.ok) {
+        if (scene === 'result') runOut();
+        else {
+          const ticks = Math.round(seconds * 60);
+          for (let i = 0; i < ticks && state.phase === 'combat'; i++) updateCombat(state, 1 / 60);
+        }
+      }
+    }
+    if (scene === 'victory') {
+      state.phase = 'victory';
+      state.round = 9;
+      state.result = { round: 9, winner: 'player', damage: 0, duration: 22.4, timeout: false, survivors: 0 };
+      if (!state.history.length) {
+        // A plausible nine-round ledger so the end screen has something real to draw.
+        for (let r = 1; r <= 9; r++) {
+          state.history.push({
+            round: r,
+            winner: r === 4 || r === 8 ? 'enemy' : 'player',
+            damage: r === 4 ? 6 : r === 8 ? 4 : 0,
+            duration: 11 + ((r * 7) % 9),
+            timeout: false,
+            survivors: r === 4 ? 3 : r === 8 ? 2 : 0,
+          });
+        }
+      }
+      state.history.push(state.result);
+      state.stats.roundsWon = 9;
+      state.stats.roundsLost = 2;
+      state.stats.damageDealt = 41230;
+      state.hp = 38;
+    }
+    if (scene === 'gameover') {
+      state.phase = 'gameover';
+      state.result = { round: 6, winner: 'enemy', damage: 7, duration: 31.2, timeout: false, survivors: 5 };
+      state.history.push(state.result);
+      state.stats.roundsWon = 5;
+      state.stats.roundsLost = 3;
+      state.stats.damageDealt = 22110;
+      state.hp = 0;
+    }
+    if (scene === 'defeat') {
+      const ok = startCombat(state);
+      if (ok.ok) { runOut(); }
+      if (state.phase === 'result') {
+        // force a loss presentation
+        state.result = { round: state.round, winner: 'enemy', damage: 6, duration: 18.7, timeout: false, survivors: 4 };
+        state.hp = Math.max(1, state.hp);
+      }
+    }
+
+    const view = {
+      hover: null, drag: null, tooltip: null, cursor: null, time: 0,
+      help: scene === 'help', drop: null,
+    };
+    if (scene === 'help') view.tooltip = null;
+    if (p.get('tooltip')) {
+      const u = state.units[0];
+      if (u) {
+        view.tooltip = { title: 'Oni', sub: '3g · Mountain · ★★', x: 300, y: 300, lines: [
+          'health 1710   attack 117', 'speed 0.70/s   range 1', 'armor 35   magic resist 25',
+          'mana 25/70', '', 'Crimson Oni — gain +60 attack and 20% lifesteal.', '', 'It has been angry for six hundred years.',
+        ] };
+        void u;
+      }
+    }
+    renderer.draw(state, view);
+    document.title = 'ready';
+  </script>
+</body>
+</html>

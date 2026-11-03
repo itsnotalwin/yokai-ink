@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>Yokai Ink — a sumi-e autobattler</title>
+  <meta name="description" content="A small sumi-e autobattler: draft yokai, place them on a hex board, and watch the ink settle.">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main id="stage">
+    <canvas id="game" width="1600" height="1000"
+            aria-label="Yokai Ink — game board. Summon yokai, place them on your half of the board, then fight."></canvas>
+  </main>
+  <p id="hint">
+    <span>Space</span> fight &nbsp;·&nbsp; <span>R</span> reroll &nbsp;·&nbsp;
+    <span>Z X C V B</span> buy &nbsp;·&nbsp; <span>1 2 4</span> speed &nbsp;·&nbsp;
+    <span>right-click</span> sell &nbsp;·&nbsp; <span>?</span> help &nbsp;·&nbsp; the run autosaves
+  </p>
+  <noscript>
+    <p style="max-width:40ch;text-align:center">This game is written in JavaScript and needs it enabled.</p>
+  </noscript>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

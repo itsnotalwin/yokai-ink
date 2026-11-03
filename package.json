@@ -1,0 +1,12 @@
+{
+  "name": "yokai-ink",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Yokai Ink - a sumi-e autobattler for the browser. No dependencies.",
+  "scripts": {
+    "serve": "node serve.mjs",
+    "test": "node tests/sim.test.js",
+    "build": "node tools/build-single-file.mjs"
+  }
+}

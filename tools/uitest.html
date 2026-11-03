@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Yokai Ink — UI test</title>
+  <style>
+    html, body { margin: 0; background: #111; }
+    canvas { display: block; width: 1600px; height: 1000px; }
+    pre { position: fixed; left: 0; top: 0; color: #0f0; font: 12px monospace; }
+  </style>
+</head>
+<body>
+  <canvas id="c" width="1600" height="1000"></canvas>
+  <pre id="log"></pre>
+  <script type="module">
+    import { newRun, updateCombat } from '../src/state.js';
+    import { createRenderer, shopCardRect, benchSlotRect, cellPx, buttons, overlayButton } from '../src/render/render.js';
+    import { createUI } from '../src/ui.js';
+
+    const lines = [];
+    const log = (s) => { lines.push(s); document.getElementById('log').textContent = lines.join('\n'); };
+    let fails = 0;
+    function check(name, ok, extra = '') {
+      log(`${ok ? 'PASS' : 'FAIL'} ${name}${extra ? ` (${extra})` : ''}`);
+      if (!ok) fails++;
+    }
+
+    const canvas = document.getElementById('c');
+    const renderer = createRenderer(canvas);
+    renderer.resize();
+
+    let state = newRun(4242);
+    const noop = () => {};
+    const audio = new Proxy({ muted: false, toggle: noop, unlock: noop }, {
+      get: (t, k) => (k in t ? t[k] : noop),
+    });
+    const ui = createUI(canvas, {
+      audio,
+      getState: () => state,
+      setState: (s) => { state = s; },
+      seed: () => 4242,
+    });
+
+    // A clean run the later sections can jump back to.
+    function resetForTest() { return newRun(777); }
+
+    const P = (type, x, y, button = 0) => new PointerEvent(type, {
+      bubbles: true, cancelable: true, pointerId: 1, isPrimary: true,
+      clientX: x, clientY: y, button, buttons: type === 'pointerup' ? 0 : 1,
+    });
+
+    function down(x, y) { canvas.dispatchEvent(P('pointerdown', x, y)); }
+    function move(x, y) { canvas.dispatchEvent(P('pointermove', x, y)); }
+    function up(x, y) { canvas.dispatchEvent(P('pointerup', x, y)); }
+    function click(x, y) { down(x, y); up(x, y); }
+
+    function drag(x1, y1, x2, y2) {
+      down(x1, y1);
+      move((x1 + x2) / 2, (y1 + y2) / 2);
+      move(x2, y2);
+      up(x2, y2);
+    }
+
+    function center(r) { return [r.x + r.w / 2, r.y + r.h / 2]; }
+
+    try {
+      state.gold = 30;
+      const idx = state.shop.findIndex((id) => id && id.length > 0);
+      const card = shopCardRect(idx);
+      const [cx, cy] = center(card);
+      const cell = cellPx(3, 6);
+
+      log(`shop[${idx}] = ${state.shop[idx]}, gold ${state.gold}`);
+
+      // 1. buy + place by dragging the card onto a hex
+      drag(cx, cy, cell.x, cell.y);
+      check('drag from shop places a unit on that hex',
+        state.units.length === 1 && state.units[0].loc.type === 'board'
+        && state.units[0].loc.col === 3 && state.units[0].loc.row === 6,
+        JSON.stringify(state.units[0] && state.units[0].loc));
+
+      // 2. drag the unit from the board to a bench slot
+      const bench = benchSlotRect(2);
+      const [bx, by] = center(bench);
+      const unit = state.units[0];
+      const from = cellPx(unit.loc.col, unit.loc.row);
+      drag(from.x, from.y, bx, by);
+      check('drag from board to bench moves the unit',
+        unit.loc.type === 'bench' && unit.loc.index === 2, JSON.stringify(unit.loc));
+
+      // 3. right-click sells it and refunds gold
+      const goldBefore = state.gold;
+      const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: bx, clientY: by, button: 2 });
+      canvas.dispatchEvent(ev);
+      check('right-click on a bench unit sells it',
+        state.units.length === 0 && state.gold > goldBefore, `gold ${goldBefore} -> ${state.gold}`);
+
+      // 4. clicking a shop card buys it to the bench (no drag)
+      const idx2 = state.shop.findIndex((id) => id);
+      if (idx2 >= 0) {
+        const [sx, sy] = center(shopCardRect(idx2));
+        const before = state.units.length;
+        click(sx, sy);
+        check('clicking a shop card buys it', state.units.length === before + 1,
+          `${before} -> ${state.units.length}`);
+      }
+
+      // 5. the fight button starts combat, and the overlay continues the run
+      const fb = buttons(state).find((b) => b.id === 'fight');
+      click(fb.x + fb.w / 2, fb.y + fb.h / 2);
+      check('fight button starts combat', state.phase === 'combat', state.phase);
+
+      let guard = 0;
+      while (state.phase === 'combat' && guard < 60 * 90) { updateCombat(state, 1 / 60); guard++; }
+      check('combat resolves', state.phase === 'result' || state.phase === 'victory' || state.phase === 'gameover',
+        `${state.phase} after ${(guard / 60).toFixed(1)}s`);
+
+      if (state.phase === 'result') {
+        const ob = overlayButton(state);
+        click(ob.x + ob.w / 2, ob.y + ob.h / 2);
+        check('continue advances the round',
+          state.phase === 'prep' && state.round === 2, `round ${state.round} phase ${state.phase}`);
+      }
+
+      // 6. keyboard reroll
+      if (state.phase === 'prep') {
+        state.gold = 10;
+        const before = state.gold;
+        window.dispatchEvent(new KeyboardEvent('keydown', { key: 'r' }));
+        check('R rerolls the shop for 2 gold', state.gold === before - 2, `${before} -> ${state.gold}`);
+      }
+
+      // 7. speed cycling
+      const sp = buttons(state).find((b) => b.id === 'speed');
+      click(sp.x + sp.w / 2, sp.y + sp.h / 2);
+      check('speed button cycles 1x -> 2x', state.speed === 2, String(state.speed));
+
+      // 8. tooltips: hovering must build one, and drawing it must not throw
+      const hoverCard = shopCardRect(0);
+      move(hoverCard.x + hoverCard.w / 2, hoverCard.y + hoverCard.h / 2);
+      check('hovering a shop card builds a tooltip', !!(ui.view.tooltip && ui.view.tooltip.title),
+        ui.view.tooltip ? ui.view.tooltip.title : 'none');
+      try {
+        renderer.draw(state, ui.view);
+        check('a frame carrying a tooltip draws', true);
+      } catch (err) {
+        check('a frame carrying a tooltip draws', false, err && err.message);
+      }
+
+      // 9. buying with the keyboard, then the two-step "New" button
+      ui.setState(state = resetForTest());
+      const shopBefore = state.units.length;
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z' }));
+      check('Z buys the first shop slot', state.units.length === shopBefore + 1,
+        `${shopBefore} -> ${state.units.length}`);
+
+      const nb = buttons(state).find((b) => b.id === 'newrun');
+      click(nb.x + nb.w / 2, nb.y + nb.h / 2);
+      check('one press only arms New', state.armedNewRun > 0 && state.units.length > 0,
+        `armed=${!!state.armedNewRun} units=${state.units.length}`);
+      const nb2 = buttons(state).find((b) => b.id === 'newrun');
+      click(nb2.x + nb2.w / 2, nb2.y + nb2.h / 2);
+      check('a second press starts a fresh run',
+        state.units.length === 0 && state.round === 1 && state.gold === 5,
+        `units=${state.units.length} round=${state.round} gold=${state.gold}`);
+
+      // 10. the stat card: click a placed yokai and it becomes the selection,
+      //     then click empty paper and the card closes again.
+      ui.setState(state = resetForTest());
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z' }));
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'x' }));
+      const placed = state.units.find((u) => u.loc.type === 'board');
+      check('a bought yokai lands on the board', !!placed, placed ? placed.defId : 'none');
+      if (placed) {
+        const cell = cellPx(placed.loc.col, placed.loc.row);
+        down(cell.x, cell.y); up(cell.x, cell.y);
+        check('clicking a yokai selects it for the stat card',
+          !!state.selected && state.selected.uid === placed.uid,
+          state.selected ? state.selected.defId : 'none');
+        try {
+          renderer.draw(state, ui.view);
+          check('a frame with the stat card draws', true);
+        } catch (err) { check('a frame with the stat card draws', false, err && err.message); }
+        const empty = cellPx(0, 0);
+        down(empty.x, empty.y); up(empty.x, empty.y);
+        check('clicking empty paper closes the card', state.selected === null);
+      }
+
+      // 11. difficulty cycles only before the run starts
+      ui.setState(state = resetForTest());
+      const before = state.difficulty;
+      const db = () => buttons(state).find((b) => b.id === 'difficulty');
+      check('difficulty is unlocked on a fresh run', db().enabled === true);
+      click(db().x + 5, db().y + 5);
+      check('clicking difficulty changes the preset', state.difficulty !== before,
+        `${before} -> ${state.difficulty}`);
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z' }));
+      check('difficulty locks once you buy', db().enabled === false);
+    } catch (err) {
+      log(`ERROR ${err && err.message}`);
+      log(err && err.stack);
+      fails++;
+    }
+
+    log(fails === 0 ? 'ALL PASS' : `${fails} FAILED`);
+    renderer.draw(state, ui.view);
+    document.title = fails === 0 ? 'PASS' : `FAIL ${fails}`;
+  </script>
+</body>
+</html>

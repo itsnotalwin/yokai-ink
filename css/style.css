@@ -1,0 +1,111 @@
+/* Yokai Ink — page chrome only. The game itself is painted on the canvas. */
+
+:root {
+  --ink: #14100c;
+  --ink-soft: #241f18;
+  --paper: #efe6d3;
+  --paper-dim: #d8cdb6;
+  --vermilion: #c2412a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 50% 0%, #1d1813 0%, #0d0a07 55%, #070504 100%);
+  color: var(--paper-dim);
+  font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "MS Mincho", Georgia, "Times New Roman", serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* A faint paper grain over the dark room. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.5) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.35) 0 1px, transparent 1px 4px);
+  mix-blend-mode: screen;
+}
+
+#stage {
+  position: relative;
+  width: min(100%, calc((100vh - 92px) * 1.6));
+  aspect-ratio: 1600 / 1000;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--paper);
+  box-shadow:
+    0 30px 70px rgba(0, 0, 0, 0.72),
+    0 2px 0 rgba(255, 255, 255, 0.06) inset,
+    0 0 0 1px rgba(239, 230, 211, 0.14),
+    0 0 90px rgba(194, 65, 42, 0.07);
+}
+
+#stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: 4px;
+  box-shadow: 0 0 60px rgba(20, 16, 12, 0.28) inset;
+}
+
+canvas#game {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: crosshair;
+}
+
+#hint {
+  margin: 0;
+  font-size: 12.5px;
+  letter-spacing: 0.08em;
+  color: #7d7264;
+  text-align: center;
+  max-width: 92vw;
+}
+
+#hint span {
+  color: #b3a794;
+}
+
+#hint span + span { margin-left: 0; }
+
+noscript p {
+  max-width: 40ch;
+  text-align: center;
+  color: var(--paper-dim);
+}
+
+@media (max-width: 720px) {
+  body { gap: 8px; padding: 8px; }
+  #stage { width: min(100%, calc((100vh - 66px) * 1.6)); }
+  #hint { font-size: 10.5px; letter-spacing: 0.04em; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The canvas animates regardless; this only stills page-level transitions. */
+  * { transition-duration: 0.001ms !important; }
+}

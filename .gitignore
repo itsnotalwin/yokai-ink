@@ -1,0 +1,12 @@
+# screenshots that are not referenced by the README (QA scratch)
+tools/shot-*.png
+tools/qa-boss.png
+tools/qa-gameover.png
+tools/qa-help.png
+tools/qa-result.png
+
+# os / editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Yokai Ink — sprite sheet</title>
+<style>
+  html, body { margin: 0; background: #efe6d3; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="sheet" width="1280" height="960"></canvas>
+<script type="module">
+  import { paperTexture, inkText, INK } from '../src/render/ink.js';
+  import { spriteFor, SPRITE_IDS } from '../src/render/sprites.js';
+  import { UNIT_BY_ID } from '../src/data/units.js';
+
+  const cv = document.getElementById('sheet');
+  const c = cv.getContext('2d');
+  const paper = paperTexture(cv.width, cv.height);
+  c.drawImage(paper, 0, 0);
+
+  const cols = 6, cell = 200;
+  SPRITE_IDS.forEach((id, i) => {
+    const x = (i % cols) * cell + cell / 2;
+    const y = Math.floor(i / cols) * 300 + 140;
+    const s = spriteFor(id);
+    // ground
+    c.save();
+    c.globalAlpha = 0.14;
+    c.fillStyle = '#4a3a26';
+    c.beginPath();
+    c.ellipse(x, y + 92, 62, 16, 0, 0, 7);
+    c.fill();
+    c.restore();
+    const draw = 210;
+    c.drawImage(s.canvas, x - draw / 2, y - draw * (s.cy / 256), draw, draw);
+    inkText(c, UNIT_BY_ID[id].name, x, y + 130, { size: 20, align: 'center', fill: INK.deep });
+    inkText(c, `${UNIT_BY_ID[id].cost}g · ${UNIT_BY_ID[id].trait}`, x, y + 152, {
+      size: 14, align: 'center', fill: INK.gray,
+    });
+  });
+  document.title = 'ready';
+</script>
+</body>
+</html>

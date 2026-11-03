@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>save test</title>
+<style>
+  body { font: 14px/1.5 ui-monospace, monospace; background: #1b1712; color: #efe6d3; padding: 24px; }
+  pre { white-space: pre-wrap; }
+  .ok { color: #8fd18f; } .bad { color: #e08a6a; }
+</style>
+</head>
+<body>
+<pre id="log">running…</pre>
+<script type="module">
+import { newRun } from '../src/state.js';
+import { buySlot } from '../src/shop.js';
+import { boardUnits } from '../src/board.js';
+import { saveRun, readSave, restore, clearSave } from '../src/save.js';
+
+const out = document.getElementById('log');
+let fails = 0;
+const log = (s) => { out.textContent += s + '\n'; };
+const check = (name, ok, extra = '') => {
+  if (!ok) fails++;
+  log(`${ok ? 'PASS' : 'FAIL'} ${name}${extra ? ' (' + extra + ')' : ''}`);
+};
+
+const mode = new URLSearchParams(location.search).get('mode') || 'write';
+
+if (mode === 'write') {
+  clearSave();
+  const state = newRun(424242);
+  // Spend some gold so the snapshot carries meaningful numbers.
+  state.gold = 20;
+  const a = buySlot(state, 0);
+  const b = buySlot(state, 1);
+  state.gold = 17; // as if the rest had been saved up
+  state.difficulty = 'ruthless';
+  const saved = saveRun(state);
+  check('a prep run saves', saved === true);
+  const raw = readSave();
+  check('the snapshot reads back', !!raw);
+  check('it keeps the round', raw && raw.round === state.round, raw && raw.round);
+  check('it keeps gold', raw && raw.gold === 17, raw && raw.gold);
+  check('it keeps the difficulty', raw && raw.difficulty === 'ruthless', raw && raw.difficulty);
+  check('it keeps units', raw && raw.units.length === state.units.length,
+    raw && `${raw.units.length} vs ${state.units.length}`);
+  log(`bought: ${[a, b].filter((r) => r && r.ok).length} · units: ${state.units.length}`);
+  log(fails === 0 ? 'SAVE OK' : `${fails} FAILED`);
+  document.title = fails === 0 ? 'SAVE OK' : 'SAVE FAIL';
+} else if (mode === 'app') {
+  // Drive the real page in an iframe: this is the only way to check that
+  // main.js — not just save.js — resumes a run and writes it back.
+  const frame = document.createElement('iframe');
+  frame.src = '/index.html';
+  frame.style.cssText = 'width:1600px;height:1000px;border:0';
+  document.body.appendChild(frame);
+  const wait = (fn, ms = 8000) => new Promise((res, rej) => {
+    const t0 = Date.now();
+    const tick = () => {
+      const v = fn();
+      if (v) return res(v);
+      if (Date.now() - t0 > ms) return rej(new Error('timeout'));
+      setTimeout(tick, 60);
+    };
+    tick();
+  });
+  try {
+    const api = await wait(() => frame.contentWindow.__yokai);
+    const st = api.state;
+    check('the page booted a resumed run', st.round === 1, `round ${st.round}`);
+    check('resumed gold came from storage', st.gold === 17, `gold ${st.gold}`);
+    check('resumed units came from storage', st.units.length === 2, `${st.units.length} yokai`);
+    check('the page is in prep', st.phase === 'prep', st.phase);
+    const wrote = api.save();
+    check('the live page can write a save', wrote === true);
+    const back = readSave();
+    check('that save is the live state', back && back.gold === st.gold && back.round === st.round,
+      back && `${back.gold}g r${back.round}`);
+  } catch (err) {
+    check('the page boots', false, String(err.message || err));
+  }
+  log(fails === 0 ? 'APP OK' : `${fails} FAILED`);
+  document.title = fails === 0 ? 'APP OK' : 'APP FAIL';
+} else {
+  const raw = readSave();
+  check('a previous save exists', !!raw);
+  if (raw) {
+    const back = restore(raw, newRun);
+    check('round survives', back.round === raw.round, back.round);
+    check('gold survives', back.gold === raw.gold, back.gold);
+    check('ink survives', back.hp === raw.hp, back.hp);
+    check('units survive', back.units.length === raw.units.length, back.units.length);
+    check('uid counter is ahead of the units', back.nextUid > back.units.length, back.nextUid);
+    check('phase is prep', back.phase === 'prep', back.phase);
+    check('no combat is attached', back.combat === null);
+    check('the rng resumes (not zero)', back.shopRng.state() !== 0, back.shopRng.state());
+    check('board helpers accept it', Array.isArray(boardUnits(back)));
+    check('the difficulty survives', back.difficulty === raw.difficulty, back.difficulty);
+    // A restored run must still be able to fight.
+    back.units.forEach((u, i) => { if (u.loc.type === 'bench') u.loc = { type: 'board', col: i % 3 + 3, row: 5 }; });
+    log(`restored: round ${back.round} · ${back.hp} ink · ${back.gold} gold · ${back.units.length} yokai`);
+  }
+  log(fails === 0 ? 'RESTORE OK' : `${fails} FAILED`);
+  document.title = fails === 0 ? 'RESTORE OK' : 'RESTORE FAIL';
+}
+</script>
+</body>
+</html>
